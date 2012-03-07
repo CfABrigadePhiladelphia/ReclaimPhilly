@@ -1,0 +1,296 @@
+<!DOCTYPE html>
+<!-- HTML5 DOCTYPE, appeals to standards mode,  -->
+<!-- degrades gracefully to quirks mode. -->
+<!-- https://github.com/CfABrigadePhiladelphia/ReclaimPhilly/index.html -->
+<!-- Need an installation script. -->
+<html>
+<head>
+<title>Reclaim Philly</title>
+<!-- Mobile phones prefer, and iPhone's Safari demands -->
+<!-- meta name="viewport" content="initial-scale-1.0, user-scalable="no" -->
+<!-- but I don't know how to insert the meta tag dynamically. -->
+
+<style type="text/css">
+/*
+ * Necessary for google maps API on a mobile phone.
+ * See http://code.google.com/apis/maps/documentation/javascript/tutorial.html
+ */
+html { height: 100%; }
+body { height: 100%; margin: 0px; padding: 0px; }
+div {margin: 0px; padding: 0px; }
+
+/*
+ * with .fullscreen, map_canvas will take its height from its container.
+ * The google maps tutorial says to set the container's height explicitly.
+ * How do we make it adaptive?
+ * Try initializing it to .desksize and switching to .fullscreen for phones.
+ */
+#map_container { height: 800px; }
+.desksize { height: 800px; width: 800px; }
+.fullscreen { height: 100%; width: 100%; }
+
+/*
+ * Local styles.
+ */
+#geocoding {
+  white-space: pre;
+}
+#main, #geocode {
+  margin: 0px;
+  padding: 0px;
+}
+#geocode fieldset {
+  margin: 0px;
+}
+#humanAddress {
+  width: 25em;
+}
+a.hilight {
+  color: #c62;
+}
+#geocode fieldset {
+  background-color: #ddd;
+  border: 1px solid #c8c8c8;
+}
+</style>
+
+<!-- Google JavaScript API -->
+<script type="text/javascript" src="https://www.google.com/jsapi"></script>
+
+<!-- Google Maps API, requires the maps api key. -->
+<!-- It is owned by t.migratorius@gmail.com, aka robin@likethebird.com, -->
+<!-- activated on 3/2/2012. -->
+<!-- Google Maps limits us to 25,000 queries/day without charge. -->
+<!-- If page load becomes a problem, refer to -->
+<!-- http://code.google.com/apis/maps/documentation/javascript/tutorial.html -->
+<!-- for how to delay script loading until document is ready. -->
+<script type="text/javascript"
+  src="http://maps.googleapis.com/maps/api/js?key=AIzaSyCC0iFJdRxXiEW57Y_HvT6GBOlRUbi7MaM&sensor=false&region=US&v=3.8">
+</script>
+
+<!-- jQuery v 1.7.1 -->
+<!-- Not subject to Same Origin Policy. -->
+<script type="text/javascript"
+  src="https://ajax.googleapis.com/ajax/libs/jquery/1.7.1/jquery.min.js">
+</script>
+<script type="text/javascript">//<![CDATA[
+
+/*
+ * Smartphone detector, lifted from
+ * http://code.google.com/apis/maps/documentation/javascript/basics.html
+ * The argument goes on about useragent detection vs. feature detection.
+ */
+var browserCategory = {
+    SMARTPHONE: 0,
+    DESKTOP: 1
+};
+function detectBrowser() {
+    var useragent = navigator.userAgent;
+    if (useragent.indexOf('iPhone') != -1 ||
+        useragent.indexOf('Android') != -1) {
+        return browserCategory.SMARTPHONE;
+    } else {
+        return browserCategory.DESKTOP;
+    }
+}
+
+/*
+ * From http://maps.googleapis.com/maps/api/geocode/json?sensor=false&address=Philadelphia,+PA
+ * Only, I don't like the location google picks to center Philadelphia,
+ * so add a fudge factor.
+ */
+var philLocation = {
+   lat : 39.9523350 + 0.03,
+   lng : -75.16378900000001
+ };
+
+/*
+ * Eventually, fetch blight locations from the server by AJAX.
+ * Prototype with some hard-coded locations.
+ */
+var blightAddresses = [
+    {
+        addr: '149 N 4th St, Philadelphia, PA 19106, USA',
+        coords: [39.9538730, -75.14646920]
+    },
+    {
+        addr: '263 N 5th St, Philadelphia, PA 19106, USA',
+        coords: [39.95512560, -75.14772460]
+    },
+    {
+        addr: '245 N 5th St, Philadelphia, PA 19106, USA',
+        coords: [39.9546270, -75.14784320]
+    },
+    {
+        addr: '668 N 36th St, Philadelphia, PA 19104, USA',
+        coords: [39.96572590, -75.1950980]
+    },
+    {
+        addr: '706 N 34th St, Philadelphia, PA 19104, USA',
+        coords: [39.96657099999999, -75.1923460]
+    },
+    {
+        addr: '1035 N 3rd St, Philadelphia, PA 19123, USA',
+        coords: [39.96690730, -75.1421050]
+    },
+    {
+        addr: '844 N 15th St, Philadelphia, PA 19130, USA',
+        coords: [39.9695880, -75.1618240]
+    }
+];
+
+/*
+ * Globals for the sake of persistance.
+ */
+
+// The one and only map.
+var googleMap;
+// The formGeocoder is for geocoding user input.
+var formGeocoder;
+// Mark the blight.
+var markers = [];
+
+/*
+ * googleMap initialization, call from document ready function.
+ */
+function mapInit() {
+    googleMap = new google.maps.Map($('#map_canvas').get(0), {
+        zoom: 12,
+        center: new google.maps.LatLng( philLocation.lat, philLocation.lng),
+        mapTypeId: google.maps.MapTypeId.ROADMAP
+    });
+    /*
+     * Smartphones want fullscreen maps but some desktop browsers wouldn't.
+     */
+    if (browserCategory.SMARTPHONE == detectBrowser()) {
+        $('#map_canvas').toggleClass('desksize fullscreen');
+    }
+}
+
+/*
+ * Make a blight marker.
+ */
+function markerFactory(coords, address) {
+    // http://code.google.com/apis/maps/documentation/javascript/reference.html#MarkerImage
+    var markerIcon = new google.maps.MarkerImage(
+            './images/blightIcon.png');
+    // Anchor the markerIcon in the center.
+    markerIcon.anchor = new google.maps.Point(9, 9);
+    var markerOpts = {
+        map: googleMap,
+        position: coords,
+        title: address,
+        icon: markerIcon
+    };
+    return marker = new google.maps.Marker(markerOpts);
+}
+
+/*
+ * From http://code.google.com/apis/maps/documentation/javascript/overlays.html
+ */
+function deleteAllMarkers() {
+    if (markers) {
+        for (i in markers) {
+            markers[i].setMap(googleMap);
+        }
+        markers.length = 0;
+    }
+}
+
+/*
+ * Geocode the address found in the #humanAddress form input,
+ * center the map on that address,
+ * and scale the map to roughly a 1 mile (1.6km) square.
+ * For now, just guess at the zoom level.
+ */
+function codeAddress() {
+    formGeocoder.geocode( { address: $('#humanAddress').val() +
+                                     ', Philadelphia, PA' },
+        function(results, status) {
+            if (status == google.maps.GeocoderStatus.OK) {
+                googleMap.setOptions({
+                    center: results[0].geometry.location,
+                    zoom: 16
+                });
+                var newBounds = googleMap.getBounds();
+                $('#geocoding').text(
+                    'Latitude and Longitude for "' +
+                    results[0].formatted_address + '" are ' +
+                    results[0].geometry.location.toString() +
+                    ',\nbounded by ' + newBounds.toString() + '.')
+                deleteAllMarkers();
+                var i;
+                // Create markers for blight within new map bounds.
+                // In the real app, limit addresses on the server side with a
+                // mySQL query.
+                for (i in blightAddresses) {
+                    var blight = blightAddresses[i];
+                    var coords = new google.maps.LatLng(
+                        blight.coords[0], blight.coords[1]);
+                    var dbgLat = coords.lat();
+                    var dbgLng = coords.lng();
+                    if (newBounds.contains(coords)) {
+                        markers.push(
+                            markerFactory(coords, blight.addr));
+                    }
+                }
+            } else {
+                $('#geocoding').text(
+                    'Geocoding the address failed for the following reason: ' +
+                    status);
+            }
+        });
+}
+
+
+/*
+ * Ready function replaces body onload.
+ */
+$(function() {
+    mapInit();
+    formGeocoder = new google.maps.Geocoder();
+    // Don't submit form and then page refresh.
+    // Instead, respond to form completion with AJAX.
+    $('#geocode').submit(function(ev) {
+        // Don't actually submit the form.
+        ev.preventDefault();
+        codeAddress();
+    });
+    $('ul li a').click(function(ev) {
+        // Don't actually follow the hyperlink.
+        ev.preventDefault();
+        var newValue = $(this).text();
+        $('#humanAddress').val(newValue);
+        // Submit the form, but not really.
+        codeAddress();
+    });
+});
+
+
+//]]></script>
+</head>
+<body>
+  <div id="main">
+    <div>
+      For the sake of a good demo, try
+      <ul>
+        <li><a href=".">300 N 5th Street</a></li>
+        <li><a href=".">701 N 35th Street</a></li>
+        <li><a href=".">1001 N 3rd Street</a></li>
+        <li><a href=".">1001 N 15th Street</a></li>
+      </ul>
+    </div>
+    <form id="geocode" method="get" action=".">
+      <fieldset>
+        <input type="text" id="humanAddress" name="humanAddress" value="" />
+        , Philadelphia, PA
+        <input type="submit" id="geocodeMe" name="geocodeMe" value="GO" />
+      </fieldset>
+    </form>
+    <div id="geocoding"></div>
+  </div>
+  <div id="map_container">
+    <div id="map_canvas" class="desksize"></div>
+  </div>
+</body>
+</html>
